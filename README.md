@@ -144,6 +144,41 @@ non-EMA to EMA weights. If you want to examine the effect of EMA vs no EMA, we p
 which contain both types of weights. For these, `use_ema=False` will load and use the non-EMA weights.
 
 
+```
+txt2image-interactive
+usage: txt2img-interactive.py [--outdir [OUTDIR]] [--skip_grid] [--skip_save] [--plms] [--ckpt CKPT] [--precision {full,autocast}]
+```
+sample with
+```
+python scripts/txt2img.py
+```
+
+example using current settings
+```
+prompt: A virus playing the guitar
+```
+
+example with settings
+```
+prompt: A virus playing the guitar --steps 32
+```
+Note: Use the following limited set of parameters after the prompt. Once you set a parameter, it becomes the new default until you change it.
+
+```
+usage: [prompt] [--steps STEPS] [--H H] [--W W] [--scale SCALE] [--seed SEED]
+
+positional arguments:
+  prompt         the prompt to render
+
+optional arguments:
+  --steps STEPS  number of ddim sampling steps (default: 32)
+  --H H          image height, in pixel space (default: 512)
+  --W W          image width, in pixel space (default: 512)
+  --scale SCALE  unconditional guidance scale: 0.0 to 15.0 (default: 7.5)
+  --seed SEED    the seed (for reproducible sampling) (default: 42)
+```
+Paramters are saved in the PNG image as a tEXT entry. Metadata is viewable in Preview on MacOS, or using third party tools on Windows such as tweakpng.exe.
+ 
 #### Diffusers Integration
 
 A simple way to download and sample Stable Diffusion is by using the [diffusers library](https://github.com/huggingface/diffusers/tree/main#new--stable-diffusion-is-now-fully-compatible-with-diffusers):
