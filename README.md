@@ -162,7 +162,7 @@ example with settings
 ```
 prompt: A virus playing the guitar --steps 32
 ```
-Note: Use the following limited set of parameters after the prompt. Once you set a parameter, it becomes the new default until you change it.
+Note: Use the following limited set of parameters after the prompt. Once you set a parameter, it becomes the new default for the session until you change it.
 
 ```
 usage: [prompt] [--steps STEPS] [--H H] [--W W] [--scale SCALE] [--seed SEED]
