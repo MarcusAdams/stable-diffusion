@@ -105,7 +105,11 @@ def input_prompt(opt, repeatParser):
         result = " ".join(repeatOpt.prompt)
         if result == "":
             result = None
-            
+    
+    if repeatOpt.plms:
+        opt.plms = True
+    elif repeatOpt.ddim:
+        opt.plms = False
     if repeatOpt.steps is not None:
         opt.ddim_steps = repeatOpt.steps
     if repeatOpt.scale is not None:
@@ -294,6 +298,16 @@ def main():
         type=int,
         help="the seed (for reproducible sampling)",
     )
+    repeatParser.add_argument(
+        "--plms",
+        action='store_true',
+        help="use plms sampling",
+    )
+    repeatParser.add_argument(
+        "--ddim",
+        action='store_true',
+        help="use ddim sampling",
+    )
 
     opt.plms = True
 
@@ -311,16 +325,14 @@ def main():
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to(device)
 
-    if opt.plms:
-        sampler = PLMSSampler(model)
-    else:
-        sampler = DDIMSampler(model)
+    plmsSampler = PLMSSampler(model)
+    ddimSampler = DDIMSampler(model)
 
     os.makedirs(opt.outdir, exist_ok=True)
     outpath = opt.outdir
 
-    print("Creating invisible watermark encoder (see https://github.com/ShieldMnt/invisible-watermark)...")
-    wm = "StableDiffusionV1"
+    #print("Creating invisible watermark encoder (see https://github.com/ShieldMnt/invisible-watermark)...")
+    # wm = "StableDiffusionV1"
     # wm_encoder = None
     # wm_encoder.set_watermark('bytes', wm.encode('utf-8'))
 
@@ -356,15 +368,27 @@ def main():
                             prompts = list(prompts)
                         c = model.get_learned_conditioning(prompts)
                         shape = [opt.C, opt.H // opt.f, opt.W // opt.f]
-                        samples_ddim, _ = sampler.sample(S=opt.ddim_steps,
-                                                         conditioning=c,
-                                                         batch_size=opt.n_samples,
-                                                         shape=shape,
-                                                         verbose=False,
-                                                         unconditional_guidance_scale=opt.scale,
-                                                         unconditional_conditioning=uc,
-                                                         eta=opt.ddim_eta,
-                                                         x_T=start_code)
+
+                        if opt.plms:
+                            samples_ddim, _ = plmsSampler.sample(S=opt.ddim_steps,
+                                                            conditioning=c,
+                                                            batch_size=opt.n_samples,
+                                                            shape=shape,
+                                                            verbose=False,
+                                                            unconditional_guidance_scale=opt.scale,
+                                                            unconditional_conditioning=uc,
+                                                            eta=opt.ddim_eta,
+                                                            x_T=start_code)
+                        else:
+                            samples_ddim, _ = ddimSampler.sample(S=opt.ddim_steps,
+                                                            conditioning=c,
+                                                            batch_size=opt.n_samples,
+                                                            shape=shape,
+                                                            verbose=False,
+                                                            unconditional_guidance_scale=opt.scale,
+                                                            unconditional_conditioning=uc,
+                                                            eta=opt.ddim_eta,
+                                                            x_T=start_code)
 
                         x_samples_ddim = model.decode_first_stage(samples_ddim)
                         x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
