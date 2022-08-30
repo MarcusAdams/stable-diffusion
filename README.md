@@ -145,12 +145,12 @@ which contain both types of weights. For these, `use_ema=False` will load and us
 
 
 ```
-txt2image-interactive
+txt2img-interactive
 usage: txt2img-interactive.py [--outdir [OUTDIR]] [--skip_grid] [--skip_save] [--plms] [--ckpt CKPT] [--precision {full,autocast}]
 ```
 sample with
 ```
-python scripts/txt2img.py
+python scripts/txt2img-interactive.py
 ```
 
 example using current settings
