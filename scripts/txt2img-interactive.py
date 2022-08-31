@@ -25,12 +25,10 @@ from ldm.models.diffusion.plms import PLMSSampler
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from transformers import AutoFeatureExtractor
 
-
 # load safety model
 #safety_model_id = "CompVis/stable-diffusion-safety-checker"
 #safety_feature_extractor = AutoFeatureExtractor.from_pretrained(safety_model_id)
 #safety_checker = StableDiffusionSafetyChecker.from_pretrained(safety_model_id)
-
 
 def chunk(it, size):
     it = iter(it)
@@ -105,11 +103,20 @@ def input_prompt(opt, repeatParser):
         result = " ".join(repeatOpt.prompt)
         if result == "":
             result = None
-    
     if repeatOpt.plms:
         opt.plms = True
     elif repeatOpt.ddim:
         opt.plms = False
+    if repeatOpt.skip_grid:
+        opt.skip_grid = True
+    elif repeatOpt.save_grid:
+        opt.skip_grid = False
+    if repeatOpt.iter is not None:
+        opt.n_iter = repeatOpt.iter
+    if repeatOpt.samples is not None:
+        opt.n_samples = repeatOpt.samples
+    if repeatOpt.rows is not None:
+        opt.n_rows = repeatOpt.rows
     if repeatOpt.steps is not None:
         opt.ddim_steps = repeatOpt.steps
     if repeatOpt.scale is not None:
@@ -225,7 +232,7 @@ def main():
     parser.add_argument(
         "--n_rows",
         type=int,
-        default=0,
+        default=2,
         help="rows in the grid (default: n_samples)",
     )
     parser.add_argument(
@@ -233,11 +240,6 @@ def main():
         type=float,
         default=7.5,
         help="unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))",
-    )
-    parser.add_argument(
-        "--from-file",
-        type=str,
-        help="if specified, load prompts from this file",
     )
     parser.add_argument(
         "--config",
@@ -262,7 +264,7 @@ def main():
         type=str,
         help="evaluate at this precision",
         choices=["full", "autocast"],
-        default="full"
+        default="autocast"
     )
     opt = parser.parse_args()
 
@@ -277,6 +279,31 @@ def main():
         "--steps",
         type=int,
         help="number of ddim sampling steps",
+    )
+    repeatParser.add_argument(
+        "--samples",
+        type=int,
+        help="how many samples to produce for each given prompt. A.k.a. batch size",
+    )
+    repeatParser.add_argument(
+        "--iter",
+        type=int,
+        help="sample this often (iterations)",
+    )
+    repeatParser.add_argument(
+        "--rows",
+        type=int,
+        help="rows (actually columns) in the grid (set to 0 to get the default: n_samples)",
+    )
+    repeatParser.add_argument(
+        "--skip_grid",
+        action='store_true',
+        help="do not save a grid, only individual samples. Helpful when evaluating lots of samples",
+    )
+    repeatParser.add_argument(
+        "--save_grid",
+        action='store_true',
+        help="save a grid, if samples > 0",
     )
     repeatParser.add_argument(
         "--H",
@@ -344,110 +371,123 @@ def main():
     base_count = len(os.listdir(sample_path))
     grid_count = len(os.listdir(outpath)) - 1
 
-    start_code = None
-    if opt.fixed_code:
-        start_code = torch.randn([opt.n_samples, opt.C, opt.H // opt.f, opt.W // opt.f], device=device)
-
     precision_scope = autocast if opt.precision=="autocast" else nullcontext
     with torch.no_grad():
         with precision_scope("cuda"):
             with model.ema_scope():
-                tic = time.time()
-                all_samples = list()
-                for n in trange(opt.n_iter, desc="Sampling"):
-                    #for prompts in tqdm(data, desc="data"):
+                while True:
                     prompts = None
                     while prompts is None:
                         prompts = input_prompt(opt, repeatParser)
 
-                    while True: #while prompts != None:
-                        uc = None
-                        if opt.scale != 1.0:
-                            uc = model.get_learned_conditioning(batch_size * [""])
-                        if isinstance(prompts, tuple):
-                            prompts = list(prompts)
-                        c = model.get_learned_conditioning(prompts)
-                        shape = [opt.C, opt.H // opt.f, opt.W // opt.f]
+                    start_code = None
+                    if opt.fixed_code:
+                        start_code = torch.randn([opt.n_samples, opt.C, opt.H // opt.f, opt.W // opt.f], device=device)
 
-                        if opt.plms:
-                            samples_ddim, _ = plmsSampler.sample(S=opt.ddim_steps,
-                                                            conditioning=c,
-                                                            batch_size=opt.n_samples,
-                                                            shape=shape,
-                                                            verbose=False,
-                                                            unconditional_guidance_scale=opt.scale,
-                                                            unconditional_conditioning=uc,
-                                                            eta=opt.ddim_eta,
-                                                            x_T=start_code)
-                        else:
-                            samples_ddim, _ = ddimSampler.sample(S=opt.ddim_steps,
-                                                            conditioning=c,
-                                                            batch_size=opt.n_samples,
-                                                            shape=shape,
-                                                            verbose=False,
-                                                            unconditional_guidance_scale=opt.scale,
-                                                            unconditional_conditioning=uc,
-                                                            eta=opt.ddim_eta,
-                                                            x_T=start_code)
+                    tic = time.time()
+                    all_samples = list()
 
-                        x_samples_ddim = model.decode_first_stage(samples_ddim)
-                        x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
-                        x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
+                    batch_size = opt.n_samples
+                    assert prompts is not None
+                    data = [batch_size * [prompts]]
 
-                        x_checked_image = x_samples_ddim
+                    for n in trange(opt.n_iter, desc="Sampling"):
+                        for prompts in tqdm(data, desc="data"):
+                            uc = None
+                            if opt.scale != 1.0:
+                                uc = model.get_learned_conditioning(batch_size * [""])
+                            # if isinstance(prompts, tuple):
+                            #     prompts = list(prompts)
+                            c = model.get_learned_conditioning(prompts)
+                            shape = [opt.C, opt.H // opt.f, opt.W // opt.f]
 
-                        x_checked_image_torch = torch.from_numpy(x_checked_image).permute(0, 3, 1, 2)
+                            if opt.plms:
+                                samples_ddim, _ = plmsSampler.sample(S=opt.ddim_steps,
+                                                                conditioning=c,
+                                                                batch_size=opt.n_samples,
+                                                                shape=shape,
+                                                                verbose=False,
+                                                                unconditional_guidance_scale=opt.scale,
+                                                                unconditional_conditioning=uc,
+                                                                eta=opt.ddim_eta,
+                                                                x_T=start_code)
+                            else:
+                                samples_ddim, _ = ddimSampler.sample(S=opt.ddim_steps,
+                                                                conditioning=c,
+                                                                batch_size=opt.n_samples,
+                                                                shape=shape,
+                                                                verbose=False,
+                                                                unconditional_guidance_scale=opt.scale,
+                                                                unconditional_conditioning=uc,
+                                                                eta=opt.ddim_eta,
+                                                                x_T=start_code)
 
-                        if not opt.skip_save:
-                            for x_sample in x_checked_image_torch:
-                                x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-                                img = Image.fromarray(x_sample.astype(np.uint8))
-                                #img = put_watermark(img, wm_encoder)
+                            x_samples_ddim = model.decode_first_stage(samples_ddim)
+                            x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
+                            x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
 
-                                while os.path.exists(os.path.join(sample_path, f"{base_count:05}.png")):
+                            x_checked_image = x_samples_ddim
+
+                            x_checked_image_torch = torch.from_numpy(x_checked_image).permute(0, 3, 1, 2)
+
+                            if not opt.skip_save:
+                                for idx, x_sample in enumerate(x_checked_image_torch):
+                                    x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
+                                    img = Image.fromarray(x_sample.astype(np.uint8))
+                                    #img = put_watermark(img, wm_encoder)
+
+                                    while os.path.exists(os.path.join(sample_path, f"{base_count:05}.png")):
+                                        base_count += 1
+
+                                    batchInfo = ""
+                                    if opt.n_samples > 0:
+                                        batchInfo = ", batched: " + str(idx + 1) + " of " + str(len(x_checked_image_torch))
+                                    metadata = PngInfo()
+                                    metadata.add_text("Author", "Stable Diffusion Checkpoint v1.4")
+                                    metadata.add_text("Description", str(prompts[idx]))
+                                    metadata.add_text("Comment",
+                                        "seed: " + str(opt.seed) +
+                                        ", steps: " + str(opt.ddim_steps) +
+                                        ", scale: " + str(opt.scale) +
+                                        ", plms: " + str(opt.plms) +
+                                        batchInfo)
+
+                                    img.save(os.path.join(sample_path, f"{base_count:05}.png"), pnginfo=metadata)
                                     base_count += 1
-                                
-                                metadata = PngInfo()
-                                metadata.add_text("Author", "Stable Diffusion Checkpoint v1.4")
-                                metadata.add_text("Description", str(prompts))
-                                metadata.add_text("Comment", "seed: " + str(opt.seed) +
-                                ", steps: " + str(opt.ddim_steps) +
-                                ", scale: " + str(opt.scale) +
-                                ", plms: " + str(opt.plms) )
 
-                                img.save(os.path.join(sample_path, f"{base_count:05}.png"), pnginfo=metadata)
-                                base_count += 1
+                            if not opt.skip_grid and opt.n_samples > 1:
+                                all_samples.append(x_checked_image_torch)
 
-                        if not opt.skip_grid:
-                            all_samples.append(x_checked_image_torch)
-                        
                         newSeed = randint(0, 999999)
-                        print("\n")
                         seed_everything(newSeed)
                         opt.seed = newSeed
 
-                        prompts = None
-                        while prompts is None:
-                            prompts = input_prompt(opt, repeatParser)
+                    if not opt.skip_grid and opt.n_samples > 1:
+                        # additionally, save as grid
+                        grid = torch.stack(all_samples, 0)
+                        grid = rearrange(grid, 'n b c h w -> (n b) c h w')
+                        grid = make_grid(grid, nrow=n_rows)
 
-                if not opt.skip_grid:
-                    # additionally, save as grid
-                    grid = torch.stack(all_samples, 0)
-                    grid = rearrange(grid, 'n b c h w -> (n b) c h w')
-                    grid = make_grid(grid, nrow=n_rows)
+                        # to image
+                        grid = 255. * rearrange(grid, 'c h w -> h w c').cpu().numpy()
+                        img = Image.fromarray(grid.astype(np.uint8))
+                        #img = put_watermark(img, wm_encoder)
 
-                    # to image
-                    grid = 255. * rearrange(grid, 'c h w -> h w c').cpu().numpy()
-                    img = Image.fromarray(grid.astype(np.uint8))
-                    #img = put_watermark(img, wm_encoder)
+                        while os.path.exists(os.path.join(outpath, f'grid-{grid_count:04}.png')):
+                            grid_count += 1
 
-                    while os.path.exists(os.path.join(outpath, f'grid-{grid_count:04}.png')):
-                       grid_count += 1
+                        metadata = PngInfo()
+                        metadata.add_text("Author", "Stable Diffusion Checkpoint v1.4")
+                        metadata.add_text("Description", str(prompts[0]))
+                        metadata.add_text("Comment",
+                            "steps: " + str(opt.ddim_steps) +
+                            ", scale: " + str(opt.scale) +
+                            ", plms: " + str(opt.plms))
 
-                    img.save(os.path.join(outpath, f'grid-{grid_count:04}.png'))
-                    grid_count += 1
+                        img.save(os.path.join(outpath, f'grid-{grid_count:04}.png'), pnginfo=metadata)
+                        grid_count += 1
 
-                toc = time.time()
+                    toc = time.time()
 
     print(f"Your samples are ready and waiting for you here: \n{outpath} \n"
           f" \nEnjoy.")
