@@ -1,15 +1,13 @@
 import argparse, os, sys, glob
 import cv2
 import torch
-torch.cuda.empty_cache()
 import numpy as np
 from omegaconf import OmegaConf
-#import piexif
 from random import randint
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from tqdm import tqdm, trange
-#from imwatermark import WatermarkEncoder
+# from imwatermark import WatermarkEncoder
 from itertools import islice
 from einops import rearrange
 from torchvision.utils import make_grid
@@ -26,10 +24,11 @@ from ldm.models.diffusion.plms import PLMSSampler
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from transformers import AutoFeatureExtractor
 
-# load safety model
-#safety_model_id = "CompVis/stable-diffusion-safety-checker"
-#safety_feature_extractor = AutoFeatureExtractor.from_pretrained(safety_model_id)
-#safety_checker = StableDiffusionSafetyChecker.from_pretrained(safety_model_id)
+
+# # load safety model
+# safety_model_id = "CompVis/stable-diffusion-safety-checker"
+# safety_feature_extractor = AutoFeatureExtractor.from_pretrained(safety_model_id)
+# safety_checker = StableDiffusionSafetyChecker.from_pretrained(safety_model_id)
 
 # Don't show info messages (about the seed) from pytorch_lightning
 _logger.setLevel(logging.WARNING)
@@ -71,33 +70,35 @@ def load_model_from_config(config, ckpt, verbose=False):
     return model
 
 
-def put_watermark(img, wm_encoder=None):
-    if wm_encoder is not None:
-        img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-        img = wm_encoder.encode(img, 'dwtDct')
-        img = Image.fromarray(img[:, :, ::-1])
-    return img
+# def put_watermark(img, wm_encoder=None):
+#     if wm_encoder is not None:
+#         img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+#         img = wm_encoder.encode(img, 'dwtDct')
+#         img = Image.fromarray(img[:, :, ::-1])
+#     return img
 
 
-def load_replacement(x):
-    try:
-        return x
-        hwc = x.shape
-        y = Image.open("assets/rick.jpeg").convert("RGB").resize((hwc[1], hwc[0]))
-        y = (np.array(y)/255.0).astype(x.dtype)
-        assert y.shape == x.shape
-        return y
-    except Exception:
-        return x
+# def load_replacement(x):
+#     try:
+#         return x
+#         hwc = x.shape
+#         y = Image.open("assets/rick.jpeg").convert("RGB").resize((hwc[1], hwc[0]))
+#         y = (np.array(y)/255.0).astype(x.dtype)
+#         assert y.shape == x.shape
+#         return y
+#     except Exception:
+#         return x
 
-def check_safety(x_image):
-    safety_checker_input = safety_feature_extractor(numpy_to_pil(x_image), return_tensors="pt")
-    x_checked_image, has_nsfw_concept = safety_checker(images=x_image, clip_input=safety_checker_input.pixel_values)
-    assert x_checked_image.shape[0] == len(has_nsfw_concept)
-    #for i in range(len(has_nsfw_concept)):
-    #    if has_nsfw_concept[i]:
-    #        x_checked_image[i] = load_replacement(x_checked_image[i])
-    return x_checked_image, has_nsfw_concept
+
+# def check_safety(x_image):
+#     safety_checker_input = safety_feature_extractor(numpy_to_pil(x_image), return_tensors="pt")
+#     x_checked_image, has_nsfw_concept = safety_checker(images=x_image, clip_input=safety_checker_input.pixel_values)
+#     assert x_checked_image.shape[0] == len(has_nsfw_concept)
+#     for i in range(len(has_nsfw_concept)):
+#         if has_nsfw_concept[i]:
+#             x_checked_image[i] = load_replacement(x_checked_image[i])
+#     return x_checked_image, has_nsfw_concept
+
 
 def input_prompt(opt, repeatParser):
     result = None
@@ -149,6 +150,7 @@ def input_prompt(opt, repeatParser):
         print(" ")
         
     return result
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -363,7 +365,7 @@ def main():
     os.makedirs(opt.outdir, exist_ok=True)
     outpath = opt.outdir
 
-    #print("Creating invisible watermark encoder (see https://github.com/ShieldMnt/invisible-watermark)...")
+    # print("Creating invisible watermark encoder (see https://github.com/ShieldMnt/invisible-watermark)...")
     # wm = "StableDiffusionV1"
     # wm_encoder = None
     # wm_encoder.set_watermark('bytes', wm.encode('utf-8'))
@@ -401,8 +403,6 @@ def main():
                             uc = None
                             if opt.scale != 1.0:
                                 uc = model.get_learned_conditioning(batch_size * [""])
-                            # if isinstance(prompts, tuple):
-                            #     prompts = list(prompts)
                             c = model.get_learned_conditioning(prompts)
                             shape = [opt.C, opt.H // opt.f, opt.W // opt.f]
 
@@ -439,7 +439,7 @@ def main():
                                 for idx, x_sample in enumerate(x_checked_image_torch):
                                     x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                                     img = Image.fromarray(x_sample.astype(np.uint8))
-                                    #img = put_watermark(img, wm_encoder)
+                                    # img = put_watermark(img, wm_encoder)
 
                                     while os.path.exists(os.path.join(sample_path, f"{base_count:05}.png")):
                                         base_count += 1
@@ -477,7 +477,7 @@ def main():
                         # to image
                         grid = 255. * rearrange(grid, 'c h w -> h w c').cpu().numpy()
                         img = Image.fromarray(grid.astype(np.uint8))
-                        #img = put_watermark(img, wm_encoder)
+                        # img = put_watermark(img, wm_encoder)
 
                         while os.path.exists(os.path.join(outpath, f'grid-{grid_count:04}.png')):
                             grid_count += 1
