@@ -14,7 +14,8 @@ from itertools import islice
 from einops import rearrange
 from torchvision.utils import make_grid
 import time
-from pytorch_lightning import seed_everything
+from pytorch_lightning import seed_everything, _logger
+import logging
 from torch import autocast
 from contextlib import contextmanager, nullcontext
 
@@ -29,6 +30,9 @@ from transformers import AutoFeatureExtractor
 #safety_model_id = "CompVis/stable-diffusion-safety-checker"
 #safety_feature_extractor = AutoFeatureExtractor.from_pretrained(safety_model_id)
 #safety_checker = StableDiffusionSafetyChecker.from_pretrained(safety_model_id)
+
+# Don't show info messages (about the seed) from pytorch_lightning
+_logger.setLevel(logging.WARNING)
 
 def chunk(it, size):
     it = iter(it)
@@ -345,6 +349,7 @@ def main():
         opt.outdir = "outputs/txt2img-samples-laion400m"
 
     seed_everything(opt.seed)
+    tqdm.write("Seed set to: " + str(opt.seed))
 
     config = OmegaConf.load(f"{opt.config}")
     model = load_model_from_config(config, f"{opt.ckpt}")
@@ -461,6 +466,7 @@ def main():
                         newSeed = randint(0, 999999)
                         seed_everything(newSeed)
                         opt.seed = newSeed
+                        tqdm.write("Seed set to: " + str(opt.seed))
 
                     if not opt.skip_grid and opt.n_samples > 1:
                         # additionally, save as grid
