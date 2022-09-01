@@ -129,6 +129,7 @@ def input_prompt(opt, repeatParser):
     if repeatOpt.seed is not None:
         opt.seed = repeatOpt.seed
         seed_everything(opt.seed)
+        tqdm.write("Seed set to: " + str(opt.seed))
     if repeatOpt.W is not None:
         if opt.W % 64 == 0:
             opt.W = repeatOpt.W
